@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gobble's Great Escape — Seven Fences to Freedom</title>
+<style>
+html,body{margin:0;padding:0;background:#2b1a08;height:100%;overflow:hidden;font-family:Verdana,Arial,sans-serif}
+#wrap{position:relative;width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle at 50% 30%,#7a4a1e,#2b1a08)}
+canvas{background:#f7c873;display:block;box-shadow:0 0 40px #000;max-width:100vw;max-height:100vh}
+#hint{position:absolute;bottom:6px;left:0;right:0;text-align:center;color:#ffe9b0;font-size:12px;opacity:.85;pointer-events:none}
+</style></head>
+<body><div id="wrap"><canvas id="cv" width="1280" height="720"></canvas></div>
+<script>
+'use strict';
+/* Gobble's Great Escape — Seven Fences to Freedom. A turkey runs 7 farm legs to the Wild Woods,
+   chased by Farmer Hank Bramble, Biscuit the dog and Cook Marge's carving knife. Original game. */
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const W=1280,H=720;
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+let rng=mulberry32(20261127);
+function rr(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath()}
+function pill(x,y,w,h,fill,stroke){rr(x,y,w,h,12);ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.lineWidth=2;ctx.strokeStyle=stroke;ctx.stroke()}}
+function text(s,x,y,size,color,align,weight){ctx.fillStyle=color||'#fff';ctx.font=(weight||'bold')+' '+size+'px Verdana,Arial,sans-serif';ctx.textAlign=align||'left';ctx.textBaseline='middle';ctx.fillText(s,x,y)}
+function textBox(s,x,y,size,color,align){const w=ctx.measureText(s).width+22;ctx.font='bold '+size+'px Verdana,Arial,sans-serif';const ww=ctx.measureText(s).width+22;pill(align==='center'?x-ww/2:align==='right'?x-ww:x,y-15,ww,30,'rgba(20,10,2,0.78)','#ffd27a');text(s,x,y,size,color,align)}
+/* ---------- data ---------- */
+const LEGS=[
+ {name:'1 · Barnyard Breakout',short:'Barnyard',sky:'#ffd98a',sky2:'#ffb347',ground:'#b5772e',grass:'#7fae3f',pal:'dawn',tip:'Henrietta: "Flap like you mean it!"',haz:['fence','hay'],dist:900},
+ {name:'2 · Cornfield Maze',short:'Cornfield',sky:'#ffe08a',sky2:'#f7a832',ground:'#c98f2e',grass:'#d9a83c',pal:'amber',tip:'Corn hides a knife glint — watch the sparkle!',haz:['fence','scarecrow','knife'],dist:1100},
+ {name:'3 · Pumpkin Patch Dash',short:'Pumpkin Patch',sky:'#ffc46b',sky2:'#f28c2e',ground:'#a8642a',grass:'#e08a2e',pal:'pumpkin',tip:'Auntie Maple hides behind the BIG pumpkin…',haz:['pumpkin','wheelbarrow','fence'],dist:1200},
+ {name:'4 · The Old Barn',short:'Old Barn',sky:'#e89a4a',sky2:'#8a4a1e',ground:'#6e3f1c',grass:'#9a6a2e',pal:'barn',tip:'Cook Marge: "The oven\'s already hot, birdie."',haz:['oven','knife','hay'],dist:1200},
+ {name:'5 · Orchard Sprint',short:'Orchard',sky:'#cfe89a',sky2:'#7fb84a',ground:'#8a6a2e',grass:'#5da33c',pal:'orchard',tip:'Biscuit joins the chase — throw him corn!',haz:['crate','ladder','apple'],dist:1300},
+ {name:'6 · Creek Crossing',short:'Creek',sky:'#bcd8e8',sky2:'#7fb0c8',ground:'#6a8a5a',grass:'#4a7a8a',pal:'creek',tip:'Daffodil: "Hop the logs, never the water!"',haz:['log','water','fence'],dist:1300},
+ {name:'7 · Golden Gate',short:'Golden Gate',sky:'#ffb347',sky2:'#e86a3a',ground:'#8a5a2a',grass:'#c98a3a',pal:'sunset',tip:'Auntie Maple: "The woods remember the fast ones, dear."',haz:['fence','hay','knife'],dist:1500}];
+const UPGRADES=[
+ {id:'boots',name:'Wing Boots',price:40,desc:'+speed, longer jumps'},
+ {id:'magnet',name:'Corn Magnet',price:50,desc:'Pickups fly to you'},
+ {id:'pouch',name:'Feather Pouch',price:60,desc:'+1 Feather Burst charge'},
+ {id:'horn',name:'Gobble Horn',price:55,desc:'Gobble stun lasts 4s'},
+ {id:'legs',name:'Sturdy Legs',price:70,desc:'Survive one extra hit'},
+ {id:'clover',name:'Lucky Clover',price:80,desc:'+1 life, every leg'},
+ {id:'quiet',name:'Quiet Steps',price:65,desc:'Hank runs slower'},
+ {id:'scarf',name:'Warm Scarf',price:45,desc:'Oven heat cannot hurt'}];
+const FLOCK=[
+ {n:'Henrietta',r:'hen',q:'"Flap like you mean it!"'},
+ {n:'Gus the Goose',r:'goose',q:'"HONK! Knife!"'},
+ {n:'Daffodil',r:'duck',q:'"Hop the logs, dear!"'},
+ {n:'Percy the Pig',r:'pig',q:'"Oops — I\'m in his way again."'},
+ {n:'Auntie Maple',r:'hen',q:'"The woods remember the fast ones."'},
+ {n:'Biscuit',r:'dog',q:'"Woof! …corn? CORN!"'},
+ {n:'Hank Bramble',r:'farmer',q:'"Come back here, dinner!"'},
+ {n:'Cook Marge',r:'cook',q:'"The oven\'s already hot, birdie."'}];
+const EVENTS=[
+ {n:'FEED-TIME RUSH',d:'Hank + Biscuit double speed!',c:'#e83a2e'},
+ {n:'RAIN SHOWER',d:'Slippery ground — corn worth x2!',c:'#2e7ad9'},
+ {n:'FOGGY DAWN',d:'Low visibility — knife glints shine!',c:'#7a8a9a'},
+ {n:'HARVEST FESTIVAL',d:'Flock cheers! Bonus corn everywhere!',c:'#e89a00'}];
+const PICKUPS=['corn','seed','acorn','berry','apple','crumb','sunflower','clover','feather','goldcorn','mapleleaf','freedom'];
+/* ---------- state ---------- */
+const G={screen:'title',leg:0,score:0,corn:0,totalCorn:0,lives:3,combo:1,bestCombo:1,distance:0,
+ burst:1,burstMax:1,gobble:100,prox:22,upgrades:{},cleared:[],legScores:[],event:null,eventT:0,
+ paused:false,muted:false,msg:'',msgT:0,grade:'C',results:null,saveMsg:'',burstFx:0,decoy:null,
+ stun:0,shake:0,runT:0,seed:20261127,shot:null,saveSlots:[null,null,null],selectedSave:0,legCorn:0,legScore:0};
+let player={x:230,y:520,vy:0,ground:true,duck:false,flap:0};
+let obstacles=[],pickups=[],feathers=[],runSpeed=6,spawnT=0,groundY=560;
+function loadSaves(){try{const s=JSON.parse(localStorage.getItem('gobble-saves')||'null');if(Array.isArray(s))G.saveSlots=s}catch(e){}}
+function persistSaves(){try{localStorage.setItem('gobble-saves',JSON.stringify(G.saveSlots))}catch(e){}}
+loadSaves();
+/* ---------- audio ---------- */
+let AC=null;
+function ac(){if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){}}if(AC&&AC.state==='suspended')AC.resume();return AC}
+function tone(f,d,type,v,slide){if(G.muted)return;const a=ac();if(!a)return;const o=a.createOscillator(),g=a.createGain();o.type=type||'sine';o.frequency.setValueAtTime(f,a.currentTime);if(slide)o.frequency.exponentialRampToValueAtTime(slide,a.currentTime+d);g.gain.setValueAtTime(v||.12,a.currentTime);g.gain.exponentialRampToValueAtTime(.001,a.currentTime+d);o.connect(g);g.connect(a.destination);o.start();o.stop(a.currentTime+d)}
+function sfx(n){if(n==='gobble'){tone(300,.12,'square',.14,520);setTimeout(()=>tone(260,.12,'square',.12,480),110);setTimeout(()=>tone(340,.15,'square',.12,560),220)}
+ else if(n==='coin'){tone(880,.09,'sine',.12,1320)} else if(n==='jump'){tone(300,.15,'sine',.1,640)}
+ else if(n==='hit'){tone(160,.25,'sawtooth',.16,70)} else if(n==='burst'){tone(500,.3,'triangle',.16,1200);tone(900,.2,'sine',.1,1800)}
+ else if(n==='stun'){tone(700,.2,'sine',.12,350)} else if(n==='win'){[523,659,784,1046].forEach((f,i)=>setTimeout(()=>tone(f,.22,'triangle',.13),i*130))}
+ else if(n==='lose'){[400,300,200,140].forEach((f,i)=>setTimeout(()=>tone(f,.25,'sawtooth',.1),i*140))}}
+let themeTimer=null;
+function startTheme(){if(themeTimer)return;const notes=[392,440,523,587,659,523,440,392];let i=0;themeTimer=setInterval(()=>{if(!G.muted&&G.screen==='title')tone(notes[i++%notes.length],.28,'triangle',.05)},300)}
+/* ---------- helpers ---------- */
+function gradeFor(s){return s>=9000?'S':s>=6000?'A':s>=3500?'B':'C'}
+function legLen(i){return LEGS[i].dist}
+function resetRun(leg){G.leg=leg;G.distance=0;G.legCorn=0;G.legScore=0;G.combo=1;G.lives=G.upgrades.clover?4:3;
+ G.burst=G.burstMax;G.gobble=100;G.prox=22;G.stun=0;G.burstFx=0;G.decoy=null;G.runT=0;G.event=EVENTS[leg%4];G.eventT=999;
+ obstacles=[];pickups=[];feathers=[];player={x:230,y:520,vy:0,ground:true,duck:false,flap:0};
+ rng=mulberry32(G.seed+leg*7919);spawnT=0;
+ G.msg=LEGS[leg].name+' — GO!';G.msgT=180;G.screen='run'}
+function addScore(n){G.score+=n;G.legScore+=n}
+function addCorn(n,kind){const mult=G.event&&G.event.n==='RAIN SHOWER'?2:1;const v=n*mult;G.corn+=v;G.totalCorn+=v;G.legCorn+=v;G.combo=Math.min(5,G.combo+0.1);G.bestCombo=Math.max(G.bestCombo,Math.floor(G.combo));G.burst=Math.min(G.burstMax,G.burst+0.15);if(kind==='goldcorn'){G.corn+=4;G.legCorn+=4} sfx('coin')}
+function hurt(kind){if(G.upgrades.scarf&&kind==='oven')return;if(G.upgrades.legs&&!G._legsUsed){G._legsUsed=true;G.msg='Sturdy Legs saved you!';G.msgT=120;return}
+ G.lives--;G.combo=1;G.prox=Math.min(96,G.prox+22);G.shake=14;sfx('hit');G.msg=kind==='oven'?'OVEN HEAT! -1 heart':kind==='knife'?'KNIFE! -1 heart':'OUCH! -1 heart';G.msgT=120;
+ if(G.lives<=0)caught()}
+function caught(){G.screen='over';sfx('lose')}
+function completeLeg(){const s=G.legScore+G.legCorn*10+Math.floor(G.distance);G.score+=0;const sc=G.legScore+G.legCorn*10;
+ G.legScores[G.leg]=sc;G.cleared[G.leg]=true;G.grade=gradeFor(sc);G.results={leg:G.leg,score:sc,corn:G.legCorn,combo:G.bestCombo,grade:G.grade};
+ G.screen='results';sfx('win')}
+function featherBurst(){if(G.burst<1||G.screen!=='run')return;G.burst--;G.burstFx=40;G.decoy={x:player.x+60,y:player.y,t:90};
+ for(let i=0;i<26;i++)feathers.push({x:player.x+20,y:player.y,rng:Math.random()*6.28,sp:2+Math.random()*4,life:50});
+ G.prox=Math.max(4,G.prox-30);G.msg='FEATHER BURST!';G.msgT=90;sfx('burst')}
+function gobble(){if(G.gobble<30||G.screen!=='run')return;G.gobble-=30;sfx('gobble');
+ if(Math.random()<0.75){G.stun=120;G.msg='GOBBLE STUN! Hank frozen 2s';G.msgT=100;sfx('stun')}else{G.msg='Gobble alerted Biscuit! He speeds up!';G.msgT=100;G.prox=Math.min(96,G.prox+10)}}
+function buyUpgrade(id){const u=UPGRADES.find(x=>x.id===id);if(!u||G.upgrades[id])return false;if(G.corn<u.price)return false;G.corn-=u.price;G.upgrades[id]=true;if(id==='pouch')G.burstMax=2;return true}
+function saveSlot(i){G.saveSlots[i]={corn:G.corn,score:G.score,cleared:G.cleared.slice(),upgrades:Object.assign({},G.upgrades),legScores:G.legScores.slice(),bestCombo:G.bestCombo};persistSaves();G.saveMsg='Saved to slot '+(i+1)}
+function loadSlot(i){const s=G.saveSlots[i];if(!s)return false;G.corn=s.corn;G.score=s.score;G.cleared=s.cleared.slice();G.upgrades=Object.assign({},s.upgrades);G.legScores=s.legScores.slice();G.bestCombo=s.bestCombo||1;G.burstMax=G.upgrades.pouch?2:1;G.saveMsg='Loaded slot '+(i+1);return true}
+/* ---------- drawing: characters (drawn canvas art, no emoji) ---------- */
+function drawTurkey(x,y,s,flap,run){ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ ctx.fillStyle='#8a5a2e';ctx.beginPath();ctx.ellipse(0,0,34,26,0,0,6.29);ctx.fill(); // body
+ ctx.fillStyle='#a86a35';ctx.beginPath();ctx.ellipse(-6,-16,26,20,0,0,6.29);ctx.fill();
+ // tail fan
+ for(let i=-2;i<=2;i++){ctx.save();ctx.rotate(i*0.35);ctx.fillStyle=i===0?'#c96a1e':'#b85a1a';ctx.beginPath();ctx.ellipse(-34,-8,20,9,0,0,6.29);ctx.fill();ctx.fillStyle='#e8a83a';ctx.beginPath();ctx.arc(-50,-8,5,0,6.29);ctx.fill();ctx.restore()}
+ // wing
+ ctx.fillStyle='#7a4a22';ctx.beginPath();ctx.ellipse(2,2,18,12,-0.4+Math.sin(run)*0.15,0,6.29);ctx.fill();
+ // head + beak + wattle
+ ctx.fillStyle='#8a5a2e';ctx.beginPath();ctx.arc(30,-26,13,0,6.29);ctx.fill();
+ ctx.fillStyle='#e8a83a';ctx.beginPath();ctx.moveTo(40,-28);ctx.lineTo(54,-23);ctx.lineTo(40,-19);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#d93a2e';ctx.beginPath();ctx.ellipse(34,-14,4,8,0,0,6.29);ctx.fill();
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(33,-30,4,0,6.29);ctx.fill();ctx.fillStyle='#111';ctx.beginPath();ctx.arc(34,-30,2,0,6.29);ctx.fill();
+ // legs
+ ctx.strokeStyle='#e8a83a';ctx.lineWidth=4;const lp=Math.sin(run)*8;ctx.beginPath();ctx.moveTo(-8,22);ctx.lineTo(-8+lp,38);ctx.moveTo(8,22);ctx.lineTo(8-lp,38);ctx.stroke();
+ ctx.restore()}
+function drawFarmer(x,y,s,run){ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ ctx.fillStyle='#3a5a8a';ctx.fillRect(-14,-58,28,58); // overalls
+ ctx.fillStyle='#c94a2e';ctx.beginPath();ctx.arc(0,-72,14,0,6.29);ctx.fill(); // head
+ ctx.fillStyle='#e8c83a';ctx.beginPath();ctx.ellipse(0,-82,20,7,0,0,6.29);ctx.fill();ctx.fillRect(-14,-96,28,8); // straw hat
+ ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(5,-74,3,0,6.29);ctx.fill();ctx.fillStyle='#111';ctx.beginPath();ctx.arc(6,-74,1.5,0,6.29);ctx.fill();
+ ctx.strokeStyle='#3a5a8a';ctx.lineWidth=7;const lp=Math.sin(run)*10;ctx.beginPath();ctx.moveTo(-8,0);ctx.lineTo(-8+lp,26);ctx.moveTo(8,0);ctx.lineTo(8-lp,26);ctx.stroke();
+ ctx.fillStyle='#5a3a1a';ctx.fillRect(-14+lp-4,24,14,7);ctx.fillRect(2-lp,24,14,7);
+ ctx.strokeStyle='#c94a2e';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(-12,-50);ctx.lineTo(-24,-30+lp);ctx.moveTo(12,-50);ctx.lineTo(26,-34-lp);ctx.stroke();
+ ctx.restore()}
+function drawDog(x,y,s,run){ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ ctx.fillStyle='#c98a4a';ctx.beginPath();ctx.ellipse(0,0,30,16,0,0,6.29);ctx.fill();
+ ctx.beginPath();ctx.arc(32,-12,13,0,6.29);ctx.fill();
+ ctx.beginPath();ctx.moveTo(24,-22);ctx.lineTo(28,-34);ctx.lineTo(34,-22);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#8a5a2e';ctx.beginPath();ctx.ellipse(-28,-4,12,8,0.5,0,6.29);ctx.fill();
+ ctx.fillStyle='#111';ctx.beginPath();ctx.arc(44,-12,3,0,6.29);ctx.fill();
+ ctx.strokeStyle='#c98a4a';ctx.lineWidth=5;const lp=Math.sin(run)*9;ctx.beginPath();ctx.moveTo(-18,12);ctx.lineTo(-18+lp,26);ctx.moveTo(18,12);ctx.lineTo(18-lp,26);ctx.stroke();
+ ctx.restore()}
+function drawCook(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ ctx.fillStyle='#f2e8d8';rr(-24,-52,48,64,14);ctx.fill(); // apron dress
+ ctx.fillStyle='#c94a2e';ctx.fillRect(-24,-52,48,10); // red collar band
+ ctx.fillStyle='#e8b88a';ctx.beginPath();ctx.arc(0,-62,13,0,6.29);ctx.fill();
+ ctx.fillStyle='#d93a2e';ctx.beginPath();ctx.arc(0,-70,14,Math.PI,0);ctx.fill(); // red headscarf
+ ctx.fillStyle='#d9d9d9';ctx.beginPath();ctx.moveTo(28,-30);ctx.lineTo(54,-46);ctx.lineTo(58,-38);ctx.lineTo(32,-20);ctx.closePath();ctx.fill(); // knife blade
+ ctx.fillStyle='#5a3a1a';ctx.fillRect(22,-32,12,8);
+ ctx.fillStyle='#111';ctx.beginPath();ctx.arc(4,-64,2,0,6.29);ctx.fill();ctx.beginPath();ctx.arc(-4,-64,2,0,6.29);ctx.fill();
+ ctx.strokeStyle='#e8b88a';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(-20,-40);ctx.lineTo(-30,-22);ctx.moveTo(20,-40);ctx.lineTo(26,-28);ctx.stroke();
+ ctx.restore()}
+function drawPortrait(kind,x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);
+ if(kind==='hen'||kind==='goose'||kind==='duck'){ctx.fillStyle=kind==='duck'?'#e8c83a':kind==='goose'?'#f2f2f2':'#c98a4a';ctx.beginPath();ctx.arc(0,0,22,0,6.29);ctx.fill();ctx.fillStyle='#e8a83a';ctx.beginPath();ctx.moveTo(18,-4);ctx.lineTo(32,0);ctx.lineTo(18,4);ctx.closePath();ctx.fill();ctx.fillStyle='#111';ctx.beginPath();ctx.arc(6,-6,3,0,6.29);ctx.fill();ctx.fillStyle='#d93a2e';ctx.beginPath();ctx.arc(0,-22,7,0,6.29);ctx.fill()}
+ else if(kind==='pig'){ctx.fillStyle='#e8a8b8';ctx.beginPath();ctx.arc(0,0,22,0,6.29);ctx.fill();ctx.beginPath();ctx.ellipse(0,2,10,7,0,0,6.29);ctx.fill();ctx.fillStyle='#111';ctx.beginPath();ctx.arc(-7,-6,3,0,6.29);ctx.fill();ctx.beginPath();ctx.arc(7,-6,3,0,6.29);ctx.fill()}
+ else if(kind==='dog'){drawDog(0,4,0.8,0)}
+ else if(kind==='farmer'){drawFarmer(0,10,0.7,0)}
+ else if(kind==='cook'){drawCook(0,10,0.7)}
+ ctx.restore()}
+function drawCorn(x,y,s){ctx.save();ctx.translate(x,y);ctx.scale(s,s);ctx.fillStyle='#e8a83a';ctx.strokeStyle='#7a4a12';ctx.lineWidth=2;ctx.beginPath();ctx.ellipse(0,0,10,14,0,0,6.29);ctx.fill();ctx.stroke();ctx.fillStyle='#f7d27a';for(let i=-1;i<=1;i++){ctx.beginPath();ctx.arc(i*4,-6,2.4,0,6.29);ctx.fill();ctx.beginPath();ctx.arc(i*4,0,2.4,0,6.29);ctx.fill();ctx.beginPath();ctx.arc(i*4,6,2.4,0,6.29);ctx.fill()}ctx.restore()}
+function drawPickup(p){if(p.kind==='corn'||p.kind==='goldcorn'){if(p.kind==='goldcorn'){ctx.fillStyle='#ffd700';ctx.beginPath();ctx.arc(p.x,p.y,20,0,6.29);ctx.fill()}drawCorn(p.x,p.y,p.kind==='goldcorn'?1.3:1)}
+ else if(p.kind==='apple'){ctx.fillStyle='#d93a2e';ctx.beginPath();ctx.arc(p.x,p.y,11,0,6.29);ctx.fill();ctx.fillStyle='#5da33c';ctx.fillRect(p.x-1,p.y-18,3,8)}
+ else if(p.kind==='feather'){ctx.fillStyle='#e8a83a';ctx.beginPath();ctx.ellipse(p.x,p.y,12,5,-0.6,0,6.29);ctx.fill()}
+ else{ctx.fillStyle='#8a6a3a';ctx.beginPath();ctx.arc(p.x,p.y,8,0,6.29);ctx.fill();ctx.fillStyle='#ffd27a';ctx.beginPath();ctx.arc(p.x,p.y,3,0,6.29);ctx.fill()}}
+function drawObstacle(o){const L=LEGS[G.leg];
+ if(o.type==='fence'){ctx.fillStyle='#8a5a2e';ctx.fillRect(o.x,o.y-58,8,58);ctx.fillRect(o.x+52,o.y-58,8,58);ctx.fillStyle='#a86a35';ctx.fillRect(o.x-6,o.y-52,72,9);ctx.fillRect(o.x-6,o.y-28,72,9)}
+ else if(o.type==='hay'){ctx.fillStyle='#d9a83c';ctx.beginPath();ctx.arc(o.x+30,o.y-26,30,0,6.29);ctx.fill();ctx.strokeStyle='#b5772e';ctx.lineWidth=3;ctx.beginPath();ctx.arc(o.x+30,o.y-26,20,0,6.29);ctx.stroke()}
+ else if(o.type==='pumpkin'){ctx.fillStyle='#e86a1e';ctx.beginPath();ctx.ellipse(o.x+30,o.y-24,32,26,0,0,6.29);ctx.fill();ctx.fillStyle='#c95a1a';ctx.beginPath();ctx.ellipse(o.x+30,o.y-24,18,26,0,0,6.29);ctx.fill();ctx.fillStyle='#5da33c';ctx.fillRect(o.x+26,o.y-56,8,12)}
+ else if(o.type==='oven'){ctx.fillStyle='rgba(255,122,26,0.35)';ctx.beginPath();ctx.arc(o.x+55,o.y-50,80,0,6.29);ctx.fill();ctx.fillStyle='#5a3a3a';ctx.fillRect(o.x,o.y-96,110,96);ctx.fillStyle='#ff7a1a';ctx.fillRect(o.x+12,o.y-84,86,60);ctx.fillStyle='#ffd27a';ctx.beginPath();ctx.arc(o.x+55,o.y-54,18,0,6.29);ctx.fill();text('OVEN',o.x+55,o.y-12,13,'#fff','center');ctx.strokeStyle='rgba(255,180,80,0.8)';ctx.lineWidth=3;for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(o.x+20+i*30,o.y-100);ctx.quadraticCurveTo(o.x+26+i*30,o.y-116,o.x+20+i*30,o.y-128);ctx.stroke()}}
+ else if(o.type==='knife'){ctx.save();ctx.translate(o.x+20,o.y-40);ctx.rotate(Math.sin(o.t||0)*0.3);ctx.fillStyle='#d9d9d9';ctx.beginPath();ctx.moveTo(0,-34);ctx.lineTo(10,10);ctx.lineTo(-10,10);ctx.closePath();ctx.fill();ctx.fillStyle='#5a3a1a';ctx.fillRect(-5,10,10,16);ctx.restore();text('!',o.x+20,o.y-64,20,'#ff2e2e','center')}
+ else if(o.type==='scarecrow'){ctx.fillStyle='#7a4a22';ctx.fillRect(o.x+26,o.y-90,8,90);ctx.fillStyle='#3a5a8a';ctx.beginPath();ctx.arc(o.x+30,o.y-100,12,0,6.29);ctx.fill();ctx.fillStyle='#e8c83a';ctx.beginPath();ctx.ellipse(o.x+30,o.y-108,18,6,0,0,6.29);ctx.fill();ctx.strokeStyle='#7a4a22';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(o.x+6,o.y-70);ctx.lineTo(o.x+54,o.y-70);ctx.stroke()}
+ else if(o.type==='wheelbarrow'){ctx.fillStyle='#7a7a7a';ctx.beginPath();ctx.moveTo(o.x,o.y-30);ctx.lineTo(o.x+64,o.y-30);ctx.lineTo(o.x+54,o.y);ctx.lineTo(o.x+10,o.y);ctx.closePath();ctx.fill();ctx.fillStyle='#e86a1e';ctx.beginPath();ctx.arc(o.x+16,o.y-2,9,0,6.29);ctx.fill()}
+ else if(o.type==='crate'){ctx.fillStyle='#a86a35';ctx.fillRect(o.x,o.y-52,56,52);ctx.strokeStyle='#7a4a22';ctx.lineWidth=3;ctx.strokeRect(o.x,o.y-52,56,52);ctx.beginPath();ctx.moveTo(o.x,o.y-52);ctx.lineTo(o.x+56,o.y);ctx.moveTo(o.x+56,o.y-52);ctx.lineTo(o.x,o.y);ctx.stroke()}
+ else if(o.type==='ladder'){ctx.strokeStyle='#8a5a2e';ctx.lineWidth=6;ctx.beginPath();ctx.moveTo(o.x+8,o.y);ctx.lineTo(o.x+8,o.y-80);ctx.moveTo(o.x+40,o.y);ctx.lineTo(o.x+40,o.y-80);ctx.stroke();ctx.lineWidth=4;for(let i=0;i<4;i++){ctx.beginPath();ctx.moveTo(o.x+8,o.y-18-i*18);ctx.lineTo(o.x+40,o.y-18-i*18);ctx.stroke()}}
+ else if(o.type==='apple'){ctx.fillStyle='#d93a2e';ctx.beginPath();ctx.arc(o.x+14,o.y-14,13,0,6.29);ctx.fill()}
+ else if(o.type==='log'){ctx.fillStyle='#8a5a2e';ctx.beginPath();ctx.ellipse(o.x+34,o.y-12,36,12,0,0,6.29);ctx.fill();ctx.fillStyle='#c98a4a';ctx.beginPath();ctx.ellipse(o.x+34,o.y-12,28,8,0,0,6.29);ctx.fill()}
+ else if(o.type==='water'){ctx.fillStyle='#3a7ad9';ctx.fillRect(o.x,o.y-6,90,10);ctx.fillStyle='#7ab0e8';ctx.fillRect(o.x+8,o.y-4,70,4)}
+ else{ctx.fillStyle='#5a3a1a';ctx.beginPath();ctx.arc(o.x+24,o.y-14,20,0,6.29);ctx.fill();text('MUD',o.x+24,o.y-14,11,'#fff','center')}}
+/* ---------- backgrounds ---------- */
+function drawBackground(legIdx,t){const L=LEGS[legIdx];const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,L.sky);g.addColorStop(0.62,L.sky2);g.addColorStop(0.63,L.ground);g.addColorStop(1,'#5a3a1a');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ ctx.fillStyle='rgba(255,240,180,0.9)';ctx.beginPath();ctx.arc(1080,90,44,0,6.29);ctx.fill();
+ ctx.fillStyle='rgba(255,255,255,0.85)';ctx.beginPath();ctx.ellipse(240,90,90,20,0,0,6.29);ctx.fill();ctx.beginPath();ctx.ellipse(620,60,70,16,0,0,6.29);ctx.fill();
+ // parallax hills / trees / corn rows
+ ctx.fillStyle=L.grass;ctx.beginPath();ctx.moveTo(0,470);ctx.quadraticCurveTo(320,420,640,465);ctx.quadraticCurveTo(960,500,1280,450);ctx.lineTo(1280,720);ctx.lineTo(0,720);ctx.closePath();ctx.fill();
+ ctx.fillStyle='rgba(0,0,0,0.12)';for(let i=0;i<8;i++){const x=((i*173+t*0.2)%1400)-60;ctx.beginPath();ctx.ellipse(x,500,60,14,0,0,6.29);ctx.fill()}
+ if(legIdx===1){ctx.fillStyle='#c98f2e';for(let x=0;x<W;x+=46){ctx.fillRect(x,380,10,180)}ctx.fillStyle='#e8c83a';for(let x=20;x<W;x+=46){ctx.beginPath();ctx.ellipse(x,360,12,26,0,0,6.29);ctx.fill()}}
+ if(legIdx===2){for(let i=0;i<5;i++){const x=140+i*240;ctx.fillStyle='#e86a1e';ctx.beginPath();ctx.ellipse(x,500,44,36,0,0,6.29);ctx.fill()}}
+ if(legIdx===3){ctx.fillStyle='#6e3f1c';ctx.fillRect(60,300,260,260);ctx.fillStyle='#8a5a2e';ctx.beginPath();ctx.moveTo(40,300);ctx.lineTo(190,210);ctx.lineTo(340,300);ctx.closePath();ctx.fill();ctx.fillStyle='#3a2a1a';ctx.fillRect(160,420,70,140)}
+ if(legIdx===4){for(let i=0;i<6;i++){const x=90+i*210;ctx.fillStyle='#4a7a2e';ctx.beginPath();ctx.arc(x,430,44,0,6.29);ctx.fill();ctx.fillStyle='#8a5a2e';ctx.fillRect(x-5,430,10,70)}}
+ if(legIdx===5){ctx.fillStyle='#3a7ad9';ctx.fillRect(0,600,1280,120);ctx.fillStyle='rgba(255,255,255,0.5)';for(let i=0;i<5;i++){ctx.fillRect(((i*300+t)%1400)-80,630,120,6)}}
+ if(legIdx===6){ctx.fillStyle='#ff8a3a';ctx.beginPath();ctx.arc(640,560,120,Math.PI,0);ctx.fill()}
+ ctx.fillStyle='#8a6a2e';ctx.fillRect(0,groundY,1280,160);ctx.fillStyle='#a86a35';ctx.fillRect(0,groundY,1280,8);
+ ctx.fillStyle='rgba(0,0,0,0.15)';for(let i=0;i<20;i++){ctx.fillRect(((i*97+t*1.4)%1400)-40,groundY+30+(i%4)*30,40,5)}}
+function drawHUD(){pill(10,10,1240,44,'rgba(20,10,2,0.82)','#ffd27a');
+ text('SCORE '+G.score,26,32,19,'#ffd27a');text('DIST '+Math.floor(G.distance)+'m',210,32,19,'#fff');
+ text('CORN '+G.corn,400,32,19,'#ffd27a');text('COMBO x'+Math.max(1,Math.floor(G.combo)),560,32,19,'#ff9a3a');
+ let hx=720;for(let i=0;i<3;i++){ctx.fillStyle=i<(G.upgrades.clover?4:3)&&i<G.lives?'#e83a2e':'#5a3a3a';ctx.beginPath();ctx.arc(hx+i*26,32,10,0,6.29);ctx.fill()}
+ text(LEGS[G.leg].name,900,32,17,'#fff');
+ // farmer proximity bar
+ pill(10,62,300,26,'rgba(20,10,2,0.82)','#ffd27a');text('HANK',20,75,13,'#ff9a3a');
+ ctx.fillStyle='#5a3a3a';rr(70,68,220,14,7);ctx.fill();ctx.fillStyle=G.prox>70?'#e83a2e':G.prox>40?'#e8a83a':'#5da33c';rr(70,68,220*G.prox/100,14,7);ctx.fill();
+ textBox(G.prox>70?'CLOSING IN!':G.prox>40?'BEHIND YOU':'FAR BEHIND',16,102,12,'#fff','left');
+ // gobble + burst meters
+ pill(320,62,300,26,'rgba(20,10,2,0.82)','#ffd27a');text('GOBBLE',330,75,13,'#7ab0e8');ctx.fillStyle='#5a3a3a';rr(410,68,130,14,7);ctx.fill();ctx.fillStyle='#7ab0e8';rr(410,68,130*G.gobble/100,14,7);ctx.fill();
+ text('BURST x'+G.burst,552,75,13,'#ffd27a');
+ if(G.event){pill(640,62,340,26,G.event.c,'#fff');text(G.event.n,810,75,13,'#fff','center')}
+ if(G.stun>0){textBox('HANK STUNNED!',640,185,22,'#7ab0e8','center')}
+ if(G.msgT>0){textBox(G.msg,640,150,20,'#ffd27a','center')}}
+function drawButtons(list){G._btns=list;for(const b of list){pill(b.x,b.y,b.w,b.h,b.hot?'#e8a83a':'#3a2a1a',b.hot?'#fff':'#ffd27a');text(b.label,b.x+b.w/2,b.y+b.h/2+1,b.size||18,b.hot?'#2b1a08':'#ffd27a','center')}}
+function clickButtons(mx,my){if(!G._btns)return false;for(const b of G._btns){if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){b.fn();return true}}return false}
+/* ---------- screens ---------- */
+function drawTitle(){drawBackground(0,G.runT);
+ pill(240,36,800,120,'rgba(20,10,2,0.85)','#ffd27a');text("GOBBLE'S GREAT ESCAPE",640,82,44,'#ffd27a','center');text('Seven Fences to Freedom — a turkey refuses to be dinner',640,128,18,'#fff','center');
+ drawTurkey(640,300,2.2,0,G.runT*0.2);drawFarmer(420,330,1.4,G.runT*0.25);drawDog(880,360,1.3,G.runT*0.3);drawCook(1010,330,1.2);
+ text('Farmer Hank Bramble: "Come back here, dinner!"',640,430,17,'#fff','center');
+ pill(180,460,920,110,'rgba(20,10,2,0.82)','#ffd27a');text('THE 7 LEGS',640,482,16,'#ffd27a','center');
+ LEGS.forEach((L,i)=>{text((G.cleared[i]?'✓ ':'')+L.name,210+(i%4)*230,512+Math.floor(i/4)*30,14,G.cleared[i]?'#7ad95d':'#fff')});
+ pill(180,580,920,56,'rgba(20,10,2,0.82)','#ffd27a');text('Arrows/WASD run + jump · SPACE gobble · SHIFT Feather Burst · click buttons work too',640,608,15,'#fff','center');
+ text('3 SAVE SLOTS on the map · M mute · P pause',640,628,13,'#ffe9b0','center');
+ // real start button drawn as pill below title area
+ pill(490,648,300,52,'#e8a83a','#fff');text('PRESS ENTER TO RUN',640,674,18,'#2b1a08','center');
+ G._btns=[{x:490,y:648,w:300,h:52,label:'PRESS ENTER TO RUN',fn:()=>{G.screen='map';sfx('coin')}}];}
+function drawMap(){drawBackground(6,G.runT);
+ pill(20,16,1240,54,'rgba(20,10,2,0.85)','#ffd27a');text('FARM MAP — SEVEN FENCES TO THE WILD WOODS',640,43,24,'#ffd27a','center');
+ // route line with 7 fences
+ ctx.strokeStyle='#fff';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(120,300);for(let i=0;i<7;i++){ctx.lineTo(120+i*170,300+((i%2)?-60:40))}ctx.lineTo(1240,260);ctx.stroke();
+ LEGS.forEach((L,i)=>{const x=120+i*170,y=300+((i%2)?-60:40);ctx.fillStyle=G.cleared[i]?'#7ad95d':i===G.cleared.filter(Boolean).length?'#e8a83a':'#8a7a5a';ctx.beginPath();ctx.arc(x,y,34,0,6.29);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=3;ctx.stroke();text(String(i+1),x,y,20,'#2b1a08','center');text(L.short,x,y+52,13,'#fff','center');if(G.cleared[i])text('CLEARED',x,y-48,12,'#7ad95d','center')});
+ text('Wild Woods → freedom!',1180,240,15,'#7ad95d','center');drawTurkey(1180,300,1.1,0,G.runT*0.2);
+ // flock portraits + quotes
+ pill(20,400,1240,180,'rgba(20,10,2,0.85)','#ffd27a');text('THE FLOCK — tap a leg to run it · Shop between legs · Save slots below',640,424,15,'#ffd27a','center');
+ FLOCK.slice(0,6).forEach((f,i)=>{const x=110+i*200;drawPortrait(f.r,x,480,1);text(f.n,x,522,13,'#fff','center');text(f.q,x,546,11,'#ffe9b0','center')});
+ const next=G.cleared.filter(Boolean).length;const btns=[
+  {x:60,y:600,w:220,h:52,label:'RUN LEG '+(Math.min(next,6)+1),fn:()=>resetRun(Math.min(next,6))},
+  {x:300,y:600,w:220,h:52,label:'SHOP (8 UPGRADES)',fn:()=>{G.screen='shop'}},
+  {x:540,y:600,w:200,h:52,label:'SAVE SLOT 1',fn:()=>saveSlot(0)},
+  {x:760,y:600,w:200,h:52,label:'LOAD SLOT 1',fn:()=>loadSlot(0)},
+  {x:980,y:600,w:220,h:52,label:'SAVE SLOT 2',fn:()=>saveSlot(1)}];
+ drawButtons(btns);
+ text('Corn '+G.corn+' · Score '+G.score+' · Legs cleared '+G.cleared.filter(Boolean).length+'/7 · Best combo x'+G.bestCombo+' · '+(G.saveMsg||'Pick a leg and run!'),640,688,14,'#ffe9b0','center');}
+function drawShop(){drawBackground(2,G.runT);
+ pill(20,16,1240,54,'rgba(20,10,2,0.85)','#ffd27a');text('FARM SHOP — SPEND CORN, RUN FASTER',640,43,24,'#ffd27a','center');
+ pill(440,76,400,34,'rgba(20,10,2,0.85)','#ffd27a');text('Corn balance: '+G.corn+'  ·  owned upgrades glow gold',640,93,16,'#ffd27a','center');
+ const btns=[];
+ UPGRADES.forEach((u,i)=>{const x=30+(i%4)*310,y=120+Math.floor(i/4)*190;const owned=!!G.upgrades[u.id];
+  pill(x,y,290,170,owned?'#e8a83a':'rgba(20,10,2,0.85)',owned?'#fff':'#ffd27a');
+  text(u.name,x+145,y+30,19,owned?'#2b1a08':'#ffd27a','center');text(u.desc,x+145,y+62,13,owned?'#2b1a08':'#fff','center');
+  text(owned?'OWNED ✓':'PRICE '+u.price+' CORN',x+145,y+96,15,owned?'#2b1a08':'#7ad95d','center');
+  text(i===0?'Wing Boots help you clear fences':i===4?'Sturdy Legs: one free hit per leg':'',x+145,y+126,11,owned?'#2b1a08':'#ffe9b0','center');
+  btns.push({x:x+45,y:y+138,w:200,h:26,label:owned?'OWNED':'BUY',fn:()=>{if(buyUpgrade(u.id))sfx('coin')}})});
+ drawButtons(btns);
+ pill(20,520,820,120,'rgba(20,10,2,0.85)','#ffd27a');text('FLOCK ADVICE',430,544,16,'#ffd27a','center');
+ text('Henrietta: "Flap like you mean it!"',40,574,14,'#fff');text('Gus: "HONK! Knife!"',40,600,14,'#fff');text('Auntie Maple: "The woods remember the fast ones, dear."',40,626,14,'#fff');
+ pill(860,520,400,120,'rgba(20,10,2,0.85)','#ffd27a');text('ROUTE — 7 FENCES',1060,544,16,'#ffd27a','center');
+ LEGS.forEach((L,i)=>text((G.cleared[i]?'✓ ':'· ')+L.short,880+(i%2)*190,570+Math.floor(i/2)*20,12,'#fff','left'));
+ const b2=[{x:60,y:660,w:260,h:48,label:'BACK TO MAP',fn:()=>{G.screen='map'}},{x:960,y:660,w:260,h:48,label:'RUN NEXT LEG',fn:()=>resetRun(Math.min(G.cleared.filter(Boolean).length,6))}];
+ G._btns=btns.concat(b2);for(const b of b2){pill(b.x,b.y,b.w,b.h,'#3a2a1a','#ffd27a');text(b.label,b.x+b.w/2,b.y+b.h/2+1,18,'#ffd27a','center')}
+ G._nav=[];}
+function drawRun(){drawBackground(G.leg,G.runT);const L=LEGS[G.leg];
+ if(G.event&&G.leg===3){ctx.fillStyle='rgba(255,122,26,0.25)';ctx.fillRect(0,0,W,H)}
+ if(G.leg===5){ctx.fillStyle='rgba(255,255,255,0.18)';ctx.fillRect(0,0,W,300)}
+ // ground pickups / obstacles
+ for(const p of pickups)drawPickup(p);
+ for(const o of obstacles)drawObstacle(o);
+ // decoy + feathers
+ if(G.decoy){drawTurkey(G.decoy.x,G.decoy.y,0.9,0,0);ctx.globalAlpha=0.6;drawTurkey(G.decoy.x,G.decoy.y,0.9,0,0);ctx.globalAlpha=1;text('DECOY!',G.decoy.x,G.decoy.y-70,14,'#ffd27a','center')}
+ for(const f of feathers){ctx.fillStyle='#e8a83a';ctx.beginPath();ctx.ellipse(f.x,f.y,8,4,f.rng,0,6.29);ctx.fill()}
+ if(G.burstFx>0){ctx.fillStyle='rgba(255,210,122,'+(G.burstFx/60)+')';ctx.beginPath();ctx.arc(player.x,player.y,90-G.burstFx,0,6.29);ctx.fill()}
+ drawTurkey(player.x,player.y,1.25,player.flap,G.runT*0.35);
+ // chasers behind
+ const hankX=player.x-90-G.prox*1.2;drawFarmer(hankX,player.y+20,1.1,G.runT*0.3);
+ if(G.stun>0){text('✦ STUNNED ✦',hankX,player.y-90,14,'#7ab0e8','center')}
+ if(G.leg>=4||G.showBiscuit){const bx=hankX-55;drawDog(bx,player.y+30,0.9,G.runT*0.35);text('Biscuit',bx,player.y+70,11,'#fff','center')}
+ text('Hank',hankX,player.y+64,11,'#fff','center');
+ if(G.leg===3){drawCook(1050,groundY-10,1.4)}
+ if(G.leg===2){text('Auntie Maple hides behind the BIG pumpkin →',640,180,15,'#ffd27a','center')}
+ if(G.leg===5){text('Daffodil: "Hop the logs, never the water!"',640,180,15,'#fff','center')}
+ drawHUD();
+ if(G.paused){pill(440,300,400,90,'rgba(20,10,2,0.9)','#ffd27a');text('PAUSED — P to resume',640,345,22,'#ffd27a','center')}
+ text('SPACE gobble · SHIFT Feather Burst · UP/W jump · P pause',640,700,13,'#ffe9b0','center');}
+function drawResults(){const r=G.results;drawBackground(G.leg,G.runT);
+ pill(340,60,600,90,'rgba(20,10,2,0.85)','#ffd27a');text('LEG '+(r.leg+1)+' COMPLETE!',640,100,32,'#ffd27a','center');text(LEGS[r.leg].name,640,132,16,'#fff','center');
+ pill(240,170,800,300,'rgba(20,10,2,0.88)','#ffd27a');
+ text('GRADE  '+r.grade,640,210,44,r.grade==='S'?'#ffd700':'#7ad95d','center');
+ text('Score '+r.score+'   ·   Corn +'+r.corn+'   ·   Best combo x'+r.combo,640,262,19,'#fff','center');
+ text('Henrietta: "Flap like you mean it — and you did!"',640,292,15,'#ffe9b0','center');
+ // per-leg bar chart
+ text('SCORE PER LEG',640,330,15,'#ffd27a','center');
+ G.legScores.forEach((s,i)=>{const bw=Math.min(90,s/40);ctx.fillStyle=i===r.leg?'#e8a83a':'#7ab0e8';ctx.fillRect(300+i*105,360,60,bw);text('L'+(i+1),330+i*105,360+bw+16,12,'#fff','center');text(String(s),330+i*105,352,11,'#fff','center')});
+ drawButtons([{x:340,y:500,w:220,h:54,label:'NEXT LEG',fn:()=>{if(G.leg<6)resetRun(G.leg+1);else G.screen='escaped'}},{x:600,y:500,w:220,h:54,label:'MAP',fn:()=>{G.screen='map'}},{x:860,y:500,w:180,h:54,label:'SHOP',fn:()=>{G.screen='shop'}}]);
+ text('Total score '+G.score+' · Total corn '+G.totalCorn+' · Legs cleared '+G.cleared.filter(Boolean).length+'/7',640,590,15,'#ffe9b0','center');}
+function drawOver(){drawBackground(3,G.runT);
+ pill(240,180,800,220,'rgba(20,10,2,0.9)','#e83a2e');text('CAUGHT!',640,240,52,'#ff6a5a','center');text('ON THE MENU… Hank got you!',640,300,22,'#fff','center');
+ text('Gobble ran '+Math.floor(G.distance)+'m and gathered '+G.legCorn+' corn on leg '+(G.leg+1)+'.',640,340,16,'#ffe9b0','center');
+ text('Cook Marge is already sharpening the knife. Try again, birdie.',640,368,14,'#fff','center');
+ drawButtons([{x:340,y:440,w:220,h:54,label:'RETRY LEG',fn:()=>resetRun(G.leg)},{x:600,y:440,w:220,h:54,label:'BACK TO MAP',fn:()=>{G.screen='map'}}]);
+ text('Score '+G.score+' · Corn '+G.corn,640,530,15,'#ffe9b0','center');}
+function drawEscaped(){drawBackground(6,G.runT);
+ pill(240,120,800,260,'rgba(20,10,2,0.9)','#7ad95d');text('FREE!',640,180,56,'#7ad95d','center');text('The Wild Woods welcome you, Gobble.',640,240,22,'#fff','center');
+ text('Seven fences. One farmer. Zero dinners.',640,278,17,'#ffe9b0','center');
+ text('Auntie Maple: "The woods remember the fast ones, dear."',640,312,15,'#fff','center');
+ text('FINAL GRADE '+gradeFor(G.score)+'  ·  Score '+G.score+'  ·  Corn '+G.totalCorn+'  ·  Best combo x'+G.bestCombo,640,348,16,'#ffd27a','center');
+ drawButtons([{x:440,y:420,w:400,h:54,label:'PLAY AGAIN (BACK TO MAP)',fn:()=>{G.screen='map'}}]);
+ text('Thank you for playing Gobble\'s Great Escape!',640,510,15,'#ffe9b0','center');}
+/* ---------- update ---------- */
+function update(){if(G.paused||G.screen!=='run'||G.shot)return;G.runT++;const speed=runSpeed+(G.upgrades.boots?1.2:0)+(G.event&&G.event.n==='FEED-TIME RUSH'?0:0);
+ G.distance+=speed*0.12;G.gobble=Math.min(100,G.gobble+0.08);
+ if(G.stun>0)G.stun--;else G.prox=Math.min(96,G.prox+0.02*(G.upgrades.quiet?0.4:1));
+ if(G.burstFx>0)G.burstFx--;if(G.decoy){G.decoy.t--;if(G.decoy.t<=0)G.decoy=null}
+ if(G.msgT>0)G.msgT--;if(G.shake>0)G.shake--;
+ // physics
+ player.vy+=0.9;player.y+=player.vy;if(player.y>=520){player.y=520;player.vy=0;player.ground=true}
+ player.flap+=0.2;
+ // spawn
+ spawnT-=speed;if(spawnT<=0){spawnT=260+Math.random()*220;const L=LEGS[G.leg];const type=L.haz[Math.floor(Math.random()*L.haz.length)];
+  obstacles.push({type,x:1300,y:groundY,w:60,h:60,t:0});
+  if(Math.random()<0.8){const kind=Math.random()<0.08?'goldcorn':Math.random()<0.15?'feather':'corn';pickups.push({kind,x:1250+Math.random()*80,y:480+Math.random()*60})}}
+ for(const o of obstacles){o.x-=speed;o.t=(o.t||0)+0.1}
+ for(const p of pickups){p.x-=speed;if(G.upgrades.magnet&&Math.abs(p.x-player.x)<140){p.x+=(player.x-p.x)*0.12;p.y+=(player.y-p.y)*0.12}}
+ for(const f of feathers){f.x-=2;f.y+=1;f.life--;if(f.life<=0)feathers.splice(feathers.indexOf(f),1)}
+ obstacles=obstacles.filter(o=>o.x>-160);pickups=pickups.filter(p=>p.x>-60);
+ // collisions
+ for(const o of obstacles){if(!o.hit&&Math.abs(o.x-player.x)<52&&player.y>groundY-110){o.hit=true;hurt(o.type==='oven'?'oven':o.type==='knife'?'knife':'fence')}}
+ for(const p of pickups){if(!p.got&&Math.abs(p.x-player.x)<46&&Math.abs(p.y-player.y)<70){p.got=true;addCorn(p.kind==='goldcorn'?5:1,p.kind);addScore(p.kind==='goldcorn'?50:10)}}
+ pickups=pickups.filter(p=>!p.got);
+ if(G.distance>=legLen(G.leg)){if(G.leg===6){G.screen='escaped';sfx('win')}else completeLeg()}
+ if(G.prox>=96)caught();}
+function render(){ctx.save();if(G.shake>0)ctx.translate((Math.random()-0.5)*G.shake,(Math.random()-0.5)*G.shake);
+ if(G.screen==='title')drawTitle();else if(G.screen==='map')drawMap();else if(G.screen==='shop')drawShop();
+ else if(G.screen==='run')drawRun();else if(G.screen==='results')drawResults();else if(G.screen==='over')drawOver();else if(G.screen==='escaped')drawEscaped();
+ ctx.restore()}
+function loop(){update();render();requestAnimationFrame(loop)}
+/* ---------- input ---------- */
+function doJump(){if(G.screen==='run'&&player.ground){player.vy=-17;player.ground=false;sfx('jump')}}
+window.addEventListener('keydown',e=>{const k=e.key.toLowerCase();
+ if(k==='m'){G.muted=!G.muted;return}
+ if(k==='p'&&G.screen==='run'){G.paused=!G.paused;return}
+ if(k==='enter'){if(G.screen==='title'){G.screen='map';sfx('coin')}else if(G.screen==='results'){if(G.leg<6)resetRun(G.leg+1)}return}
+ if(k===' '||k==='arrowup'||k==='w'){e.preventDefault();if(G.screen==='run'){if(k===' ')gobble();else doJump()}else if(G.screen==='title'){G.screen='map'}}
+ if(k==='shift'){featherBurst()}
+ if(k==='arrowdown'||k==='s'){player.duck=true}
+ if(k==='escape'&&G.screen==='run'){G.screen='map'}});
+window.addEventListener('keyup',e=>{if(e.key.toLowerCase()==='arrowdown'||e.key.toLowerCase()==='s')player.duck=false});
+cv.addEventListener('click',e=>{const r=cv.getBoundingClientRect();const mx=(e.clientX-r.left)*1280/r.width,my=(e.clientY-r.top)*720/r.height;
+ if(G.screen==='shop'&&G._nav){for(const b of G._nav){if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){b.fn();return}}}
+ if(clickButtons(mx,my))return;
+ if(G.screen==='run'){const y=my;if(y<300)doJump();else gobble()}});
+startTheme();
+/* ---------- ?shot= staging (deterministic) ---------- */
+const params=new URLSearchParams(location.search);const shot=params.get('shot');G.shot=shot;
+if(shot==='title'){G.screen='title';G.cleared=[true,true,false,false,false,false,false];G.score=1250;G.corn=86}
+else if(shot==='play'){G.corn=86;G.score=3420;G.leg=1;G.screen='run';G.distance=642;G.combo=3;G.bestCombo=4;G.burst=1;G.gobble=72;G.prox=30;G.burstFx=32;G.decoy={x:420,y:500,t:90};G.event=EVENTS[3];G.lives=3;G._legsUsed=false;
+ player={x:230,y:470,vy:0,ground:false,duck:false,flap:1};G.showBiscuit=true;
+ obstacles=[{type:'fence',x:900,y:groundY,w:60,h:60,t:0},{type:'scarecrow',x:1120,y:groundY,w:60,h:60,t:0}];
+ pickups=[{kind:'corn',x:520,y:480},{kind:'corn',x:580,y:470},{kind:'corn',x:640,y:480},{kind:'goldcorn',x:760,y:460},{kind:'corn',x:980,y:500}];
+ for(let i=0;i<18;i++)feathers.push({x:230+Math.random()*120-40,y:470+Math.random()*60-20,rng:Math.random()*6.28,sp:2,life:50});
+ G.msg='FEATHER BURST!';G.msgT=999}
+else if(shot==='barn'){G.corn=120;G.score=5100;G.leg=3;G.screen='run';G.distance=480;G.combo=2;G.bestCombo=3;G.burst=1;G.gobble=55;G.prox=44;G.event=EVENTS[0];G.lives=2;
+ player={x:230,y:520,vy:0,ground:true,duck:false,flap:1};
+ obstacles=[{type:'oven',x:760,y:groundY,w:110,h:96,t:0},{type:'knife',x:920,y:groundY,w:40,h:60,t:0.4},{type:'hay',x:560,y:groundY,w:60,h:60,t:0}];
+ pickups=[{kind:'corn',x:420,y:480},{kind:'corn',x:480,y:480},{kind:'corn',x:640,y:500}];G.msg="Cook Marge: \"The oven's already hot, birdie.\"";G.msgT=999}
+else if(shot==='shop'){G.corn=320;G.score=5100;G.screen='shop';G.upgrades={boots:true,magnet:true};G.cleared=[true,true,true,true,false,false,false];G.legScores=[820,1240,980,1420];G.saveSlots=[{corn:320,score:5100,cleared:[true,true,true,true,false,false,false],upgrades:{boots:true},legScores:[820,1240,980,1420],bestCombo:4},null,null]}
+if(!shot){G.screen='title'}
+/* ---------- test API ---------- */
+window.__turkey={G,LEGS,UPGRADES,resetRun,buyUpgrade,saveSlot,loadSlot,featherBurst,gobble,hurt,completeLeg,caught,
+ startLeg:n=>resetRun(n),setCorn:n=>{G.corn=n},setLives:n=>{G.lives=n}};
+loop();
+</script>
+</body></html>
+
